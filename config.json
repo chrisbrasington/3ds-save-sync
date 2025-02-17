@@ -1,0 +1,12 @@
+{
+    "n3dsxl": {
+        "display_name": "red",
+        "ip": "192.168.0.20",
+        "port": 5000
+    },
+    "n3ds": {
+        "display_name": "small",
+        "ip": "192.168.0.29",
+        "port": 5000
+    }
+}
