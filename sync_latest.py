@@ -1,8 +1,10 @@
 import json
 import os
+import re
 import shutil
 from ftplib import FTP, error_perm
 from datetime import datetime
+
 
 CONFIG_FILE = "config.json"
 SAVE_PATH = "/3ds/Checkpoint/saves"
@@ -19,58 +21,54 @@ def connect_ftp(host, port):
     return ftp
 
 def list_games(ftp, filter_term):
+    # print(f'searching...{filter_term}')
     try:
         ftp.cwd(SAVE_PATH)
         games = []
 
-        def parse_game_dir(line):
-            parts = line.split()
-            name = " ".join(parts[8:])
-            if not filter_term or filter_term in name.lower():
-                games.append(name)
+        # List directories exactly as they appear
+        directories = ftp.nlst()
+        directories = [d.strip() for d in directories]  # Ensure no leading/trailing spaces
 
-        ftp.retrlines('LIST', parse_game_dir)
+        for directory in directories:
+            # Only add directories that contain the filter term
+            if filter_term.lower() in directory.lower():
+                games.append(directory)
+
+        # Debugging: Show the exact directory names found
+        print(f"[DEBUG] Found games: {games}")
+
         return games
     except error_perm as e:
-        print(f"[WARN] Unable to access '{SAVE_PATH}': {e}")
+        print(f"[WARN] Unable to access save path '{SAVE_PATH}': {e}")
         return []
 
 def get_latest_save(ftp, game_dir):
-    full_path = f"{SAVE_PATH}/{game_dir}"
+    # Break the path into parts to navigate step by step
+    path_parts = game_dir.split('/')
+    current_path = SAVE_PATH
+
     try:
-        parent_dir = '/'.join(full_path.split('/')[:-1])
-        ftp.cwd(parent_dir)
-        target_dir = full_path.split('/')[-1]
 
-        directories = []
-        for entry in ftp.mlsd():
-            name, facts = entry
-            if name == target_dir and facts['type'] == 'dir':
-                ftp.cwd(name)
-                for sub_entry in ftp.mlsd():
-                    sub_name, sub_facts = sub_entry
-                    if is_timestamp_folder(sub_name):
-                        directories.append(sub_name)
+        print(f'navigating to {game_dir}')
+        ftp.cwd(game_dir)
+        
+        # List directories and find the latest timestamp folder
+        directories = ftp.nlst()
 
-        directories.sort(reverse=True)
-        if directories:
-            latest_save = f"{full_path}/{directories[0]}"
+        timestamp_folders = [d for d in directories]
+        timestamp_folders.sort(reverse=True)
+
+        if timestamp_folders:
+            latest_save = f"{current_path}/{timestamp_folders[0]}"
             print(f"[INFO] Found latest save: {latest_save}")
             return latest_save
         else:
             print(f"[WARN] No save found for '{game_dir}'. Skipping.")
             return None
     except error_perm as e:
-        print(f"[WARN] Unable to access directory '{full_path}': {e}")
+        print(f"[WARN] Unable to access directory '{current_path}': {e}")
         return None
-
-def is_timestamp_folder(folder_name):
-    try:
-        datetime.strptime(folder_name, "%Y%m%d-%H%M%S")
-        return True
-    except ValueError:
-        return False
-
 
 def ensure_directory_exists(ftp, device_name, path):
     """ Recursively create directories on the FTP server and log which device. """
