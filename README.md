@@ -2,7 +2,7 @@
 
 This script connects to two 3DS systems via FTP, automatically determines which system has the latest save file, and transfers it to the other system.  
 
-Using [checkpoint](https://github.com/BernardoGiordano/Checkpoint) save backups and (ftpd)[https://github.com/mtheall/ftpd]
+Using [checkpoint](https://github.com/BernardoGiordano/Checkpoint) save backups and [ftpd](https://github.com/mtheall/ftpd)
 
 ### Steps:
 1. Using [checkpoint](https://github.com/BernardoGiordano/Checkpoint), create a backup save on the source system.
