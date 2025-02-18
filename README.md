@@ -6,8 +6,8 @@ Using [checkpoint](https://github.com/BernardoGiordano/Checkpoint) save backups 
 
 ### Steps:
 1. Using [checkpoint](https://github.com/BernardoGiordano/Checkpoint), create a backup save on the source system.
-2. Run (ftpd)[https://github.com/mtheall/ftpd] on the source system
-3. Also run (ftpd)[https://github.com/mtheall/ftpd] on the target system
+2. Run [ftpd](https://github.com/mtheall/ftpd) on the source system
+3. Also run [ftpd](https://github.com/mtheall/ftpd) on the target system
 4. Ensure the config.json has the two systems
 5. Run `python sync_latest.py`
 6. Optionally use a search term (case insensitive)
