@@ -190,7 +190,7 @@ def main():
                 # Both have the same latest save
                 in_sync_games.append(game)
 
-    print(sync_plan)
+    # print(sync_plan)
 
     # Confirm and execute sync
     if summarize_and_confirm(sync_plan, in_sync_games):
