@@ -71,8 +71,9 @@ def is_timestamp_folder(folder_name):
     except ValueError:
         return False
 
-def ensure_directory_exists(ftp, path):
-    """ Recursively create directories on the FTP server. """
+
+def ensure_directory_exists(ftp, device_name, path):
+    """ Recursively create directories on the FTP server and log which device. """
     parts = path.split('/')
     for i in range(1, len(parts) + 1):
         directory = '/'.join(parts[:i])
@@ -81,18 +82,18 @@ def ensure_directory_exists(ftp, path):
         try:
             ftp.cwd(directory)  # Try to change to the directory
         except error_perm:
-            print(f"[INFO] Creating directory: {directory}")
+            print(f"[INFO] Creating directory on {device_name}: {directory}")
             try:
                 ftp.mkd(directory)  # Create it if it doesn't exist
             except error_perm as e:
-                print(f"[ERROR] Failed to create directory '{directory}': {e}")
+                print(f"[ERROR] Failed to create directory '{directory}' on {device_name}: {e}")
 
-def sync_save(source_ftp, target_ftp, source_path, target_path):
+def sync_save(source_ftp, target_ftp, source_name, target_name, source_path, target_path):
     if not os.path.exists(TMP_DIR):
         os.makedirs(TMP_DIR)
 
     # Ensure the target directory exists before uploading files
-    ensure_directory_exists(target_ftp, target_path)
+    ensure_directory_exists(target_ftp, target_name, target_path)
 
     source_ftp.cwd(source_path)
     files = []
@@ -100,12 +101,15 @@ def sync_save(source_ftp, target_ftp, source_path, target_path):
 
     for file in files:
         local_tmp_file = os.path.join(TMP_DIR, file)
+        # Download from source
         with open(local_tmp_file, 'wb') as f:
             source_ftp.retrbinary(f"RETR {file}", f.write)
+        # Upload to target
         with open(local_tmp_file, 'rb') as f:
             target_ftp.storbinary(f"STOR " + os.path.join(target_path, file), f)
-    
-    print(f"[INFO] Synced from {source_path} to {target_path}")
+
+    print(f"[INFO] Synced from {source_name} {source_path} to {target_name} {target_path}")
+
 
 def summarize_and_confirm(sync_plan, in_sync_games):
     print("\nSummary of actions:")
