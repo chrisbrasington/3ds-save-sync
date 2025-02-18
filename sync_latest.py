@@ -8,11 +8,9 @@ CONFIG_FILE = "config.json"
 SAVE_PATH = "/3ds/Checkpoint/saves"
 TMP_DIR = "./tmp"
 
-
 def load_config():
     with open(CONFIG_FILE, 'r') as f:
         return json.load(f)
-
 
 def connect_ftp(host, port):
     ftp = FTP()
@@ -20,8 +18,7 @@ def connect_ftp(host, port):
     ftp.login('anonymous', 'anonymous@')
     return ftp
 
-
-def list_games(ftp):
+def list_games(ftp, filter_term):
     try:
         ftp.cwd(SAVE_PATH)
         games = []
@@ -29,21 +26,14 @@ def list_games(ftp):
         def parse_game_dir(line):
             parts = line.split()
             name = " ".join(parts[8:])
-            games.append(name)
+            if not filter_term or filter_term in name.lower():
+                games.append(name)
 
         ftp.retrlines('LIST', parse_game_dir)
         return games
     except error_perm as e:
         print(f"[WARN] Unable to access '{SAVE_PATH}': {e}")
         return []
-
-
-def filter_games(games):
-    search_term = input("Enter a game name (leave blank for all games): ").strip().lower()
-    if not search_term:
-        return games  # Return all games if no filter is provided
-    return [game for game in games if search_term in game.lower()]
-
 
 def get_latest_save(ftp, game_dir):
     full_path = f"{SAVE_PATH}/{game_dir}"
@@ -74,7 +64,6 @@ def get_latest_save(ftp, game_dir):
         print(f"[WARN] Unable to access directory '{full_path}': {e}")
         return None
 
-
 def is_timestamp_folder(folder_name):
     try:
         datetime.strptime(folder_name, "%Y%m%d-%H%M%S")
@@ -82,10 +71,28 @@ def is_timestamp_folder(folder_name):
     except ValueError:
         return False
 
+def ensure_directory_exists(ftp, path):
+    """ Recursively create directories on the FTP server. """
+    parts = path.split('/')
+    for i in range(1, len(parts) + 1):
+        directory = '/'.join(parts[:i])
+        if not directory:  # Skip the root path
+            continue
+        try:
+            ftp.cwd(directory)  # Try to change to the directory
+        except error_perm:
+            print(f"[INFO] Creating directory: {directory}")
+            try:
+                ftp.mkd(directory)  # Create it if it doesn't exist
+            except error_perm as e:
+                print(f"[ERROR] Failed to create directory '{directory}': {e}")
 
 def sync_save(source_ftp, target_ftp, source_path, target_path):
     if not os.path.exists(TMP_DIR):
         os.makedirs(TMP_DIR)
+
+    # Ensure the target directory exists before uploading files
+    ensure_directory_exists(target_ftp, target_path)
 
     source_ftp.cwd(source_path)
     files = []
@@ -96,20 +103,26 @@ def sync_save(source_ftp, target_ftp, source_path, target_path):
         with open(local_tmp_file, 'wb') as f:
             source_ftp.retrbinary(f"RETR {file}", f.write)
         with open(local_tmp_file, 'rb') as f:
-            target_ftp.storbinary(f"STOR {file}", f)
+            target_ftp.storbinary(f"STOR " + os.path.join(target_path, file), f)
     
     print(f"[INFO] Synced from {source_path} to {target_path}")
 
-
-def summarize_and_confirm(sync_plan):
+def summarize_and_confirm(sync_plan, in_sync_games):
     print("\nSummary of actions:")
     for game, info in sync_plan.items():
         print(f"{game}: Copy from {info['source_name']} to {info['target_name']}")
-    proceed = input("Proceed with sync? (y/n): ").strip().lower()
+    
+    print("\nAlready in sync:")
+    for game in in_sync_games:
+        print(game)
+    
+    proceed = input("\nProceed with sync? (y/n): ").strip().lower()
     return proceed == 'y'
 
-
 def main():
+    # Ask for game filter
+    game_filter = input("Enter game name to filter (leave empty to show all): ").strip().lower()
+
     # Load configuration
     config = load_config()
 
@@ -125,11 +138,9 @@ def main():
         display_name = config[name]["display_name"]
         print(f"\n[INFO] Checking games on {display_name}...")
         
-        games = list_games(ftp)
-        filtered_games = filter_games(games)  # Apply filtering here
-        
+        games = list_games(ftp, game_filter)
         saves[name] = {}
-        for game_path in filtered_games:
+        for game_path in games:
             latest_save = get_latest_save(ftp, game_path)
             if latest_save:
                 game_name = game_path.replace(SAVE_PATH + '/', '')
@@ -138,6 +149,7 @@ def main():
 
     # Determine sync plan
     sync_plan = {}
+    in_sync_games = []
     for game in set(g for s in saves.values() for g in s):
         latest = {}
         for system, game_saves in saves.items():
@@ -172,9 +184,12 @@ def main():
                     'source_name': config[sys2]['display_name'],
                     'target_name': config[sys1]['display_name']
                 }
+            else:
+                # Both have the same latest save
+                in_sync_games.append(game)
 
     # Confirm and execute sync
-    if summarize_and_confirm(sync_plan):
+    if summarize_and_confirm(sync_plan, in_sync_games):
         for game, info in sync_plan.items():
             source_ftp = ftp_connections[info['source']]
             target_ftp = ftp_connections[info['target']]
@@ -183,9 +198,8 @@ def main():
     # Clean up FTP connections and temp files
     for ftp in ftp_connections.values():
         ftp.quit()
-    if os.path.exists(TTMP_DIR):
+    if os.path.exists(TMP_DIR):
         shutil.rmtree(TMP_DIR)
-
 
 if __name__ == "__main__":
     main()
