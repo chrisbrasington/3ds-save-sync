@@ -60,7 +60,7 @@ def get_latest_save(ftp, game_dir):
         timestamp_folders.sort(reverse=True)
 
         if timestamp_folders:
-            latest_save = f"{current_path}/{timestamp_folders[0]}"
+            latest_save = f"{timestamp_folders[0]}"
             print(f"[INFO] Found latest save: {latest_save}")
             return latest_save
         else:
@@ -190,11 +190,14 @@ def main():
                 # Both have the same latest save
                 in_sync_games.append(game)
 
+    print(sync_plan)
+
     # Confirm and execute sync
     if summarize_and_confirm(sync_plan, in_sync_games):
         for game, info in sync_plan.items():
             source_ftp = ftp_connections[info['source']]
             target_ftp = ftp_connections[info['target']]
+
             sync_save(source_ftp, target_ftp, info['source_name'], info['target_name'], info['save'], info['save'])
 
     # Clean up FTP connections and temp files
