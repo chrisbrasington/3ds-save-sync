@@ -27,9 +27,7 @@ def list_games(ftp):
         games = []
 
         def parse_game_dir(line):
-            # Split the line by spaces, but join the last parts back to handle spaces in directory names
             parts = line.split()
-            # Last part is the name, but it could be multiple words
             name = " ".join(parts[8:])
             games.append(name)
 
@@ -40,16 +38,20 @@ def list_games(ftp):
         return []
 
 
+def filter_games(games):
+    search_term = input("Enter a game name (leave blank for all games): ").strip().lower()
+    if not search_term:
+        return games  # Return all games if no filter is provided
+    return [game for game in games if search_term in game.lower()]
+
+
 def get_latest_save(ftp, game_dir):
-    # Construct the full path
     full_path = f"{SAVE_PATH}/{game_dir}"
     try:
-        # Change to parent directory first
         parent_dir = '/'.join(full_path.split('/')[:-1])
         ftp.cwd(parent_dir)
         target_dir = full_path.split('/')[-1]
 
-        # Use MLSD to list directories
         directories = []
         for entry in ftp.mlsd():
             name, facts = entry
@@ -71,7 +73,6 @@ def get_latest_save(ftp, game_dir):
     except error_perm as e:
         print(f"[WARN] Unable to access directory '{full_path}': {e}")
         return None
-
 
 
 def is_timestamp_folder(folder_name):
@@ -125,8 +126,10 @@ def main():
         print(f"\n[INFO] Checking games on {display_name}...")
         
         games = list_games(ftp)
+        filtered_games = filter_games(games)  # Apply filtering here
+        
         saves[name] = {}
-        for game_path in games:
+        for game_path in filtered_games:
             latest_save = get_latest_save(ftp, game_path)
             if latest_save:
                 game_name = game_path.replace(SAVE_PATH + '/', '')
@@ -180,7 +183,7 @@ def main():
     # Clean up FTP connections and temp files
     for ftp in ftp_connections.values():
         ftp.quit()
-    if os.path.exists(TMP_DIR):
+    if os.path.exists(TTMP_DIR):
         shutil.rmtree(TMP_DIR)
 
 
