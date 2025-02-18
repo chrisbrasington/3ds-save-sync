@@ -1,8 +1,7 @@
 import json
 import os
 import shutil
-import ftplib
-from ftplib import FTP
+from ftplib import FTP, error_perm
 from datetime import datetime
 
 CONFIG_FILE = "config.json"
@@ -22,45 +21,58 @@ def connect_ftp(host, port):
     return ftp
 
 
-def list_game_saves(ftp):
-    ftp.cwd(SAVE_PATH)
-    games = []
-    ftp.retrlines('LIST', lambda line: games.append(line.split()[-1]))
-    return games
+def list_games(ftp):
+    try:
+        ftp.cwd(SAVE_PATH)
+        games = []
+
+        def parse_game_dir(line):
+            # Split the line by spaces, but join the last parts back to handle spaces in directory names
+            parts = line.split()
+            # Last part is the name, but it could be multiple words
+            name = " ".join(parts[8:])
+            games.append(name)
+
+        ftp.retrlines('LIST', parse_game_dir)
+        return games
+    except error_perm as e:
+        print(f"[WARN] Unable to access '{SAVE_PATH}': {e}")
+        return []
 
 
 def get_latest_save(ftp, game_dir):
+    # Construct the full path
+    full_path = f"{SAVE_PATH}/{game_dir}"
     try:
-        # Change to the base save path
-        ftp.cwd(SAVE_PATH)
-        
-        # List directories in the base save path
-        directories = ftp.nlst()
-        for directory in directories:
-            # Check if the directory name contains the game_dir
-            if game_dir in directory:
-                try:
-                    # Change to the matched directory
-                    ftp.cwd(directory)
-                    
-                    # List files and sort them alphabetically
-                    files = ftp.nlst()
-                    files.sort(reverse=True)  # Assuming latest file is last
-                    
-                    # Return the latest file with the correct path
-                    if files:
-                        latest_save = files[0]
-                        full_path = f"{SAVE_PATH}/{directory}/{latest_save}"
-                        return full_path
-                except ftplib.error_perm as e:
-                    print(f"[WARN] Unable to access directory '{SAVE_PATH}/{directory}': {e}")
-                    
-        print(f"[WARN] No save found for '{game_dir}'. Skipping.")
+        # Change to parent directory first
+        parent_dir = '/'.join(full_path.split('/')[:-1])
+        ftp.cwd(parent_dir)
+        target_dir = full_path.split('/')[-1]
+
+        # Use MLSD to list directories
+        directories = []
+        for entry in ftp.mlsd():
+            name, facts = entry
+            if name == target_dir and facts['type'] == 'dir':
+                ftp.cwd(name)
+                for sub_entry in ftp.mlsd():
+                    sub_name, sub_facts = sub_entry
+                    if is_timestamp_folder(sub_name):
+                        directories.append(sub_name)
+
+        directories.sort(reverse=True)
+        if directories:
+            latest_save = f"{full_path}/{directories[0]}"
+            print(f"[INFO] Found latest save: {latest_save}")
+            return latest_save
+        else:
+            print(f"[WARN] No save found for '{game_dir}'. Skipping.")
+            return None
+    except error_perm as e:
+        print(f"[WARN] Unable to access directory '{full_path}': {e}")
         return None
-        
-    except ftplib.error_perm as e:
-        print(f"[ERROR] Unable to access base save path '{SAVE_PATH}': {e}")
-        return None
+
+
 
 def is_timestamp_folder(folder_name):
     try:
@@ -70,21 +82,11 @@ def is_timestamp_folder(folder_name):
         return False
 
 
-def summarize_and_confirm(sync_plan):
-    print("Summary of actions:")
-    for game, info in sync_plan.items():
-        print(f"{game}: Copy from {info['source']} to {info['target']}")
-    proceed = input("Proceed with sync? (y/n): ").strip().lower()
-    return proceed == 'y'
-
-
-def sync_save(source_ftp, target_ftp, game_dir, latest_save):
-    source_path = f"{SAVE_PATH}/{game_dir}/{latest_save}"
-    target_path = f"{SAVE_PATH}/{game_dir}/{latest_save}"
-    source_ftp.cwd(source_path)
+def sync_save(source_ftp, target_ftp, source_path, target_path):
     if not os.path.exists(TMP_DIR):
         os.makedirs(TMP_DIR)
 
+    source_ftp.cwd(source_path)
     files = []
     source_ftp.retrlines('LIST', lambda line: files.append(line.split()[-1]))
 
@@ -94,50 +96,90 @@ def sync_save(source_ftp, target_ftp, game_dir, latest_save):
             source_ftp.retrbinary(f"RETR {file}", f.write)
         with open(local_tmp_file, 'rb') as f:
             target_ftp.storbinary(f"STOR {file}", f)
+    
+    print(f"[INFO] Synced from {source_path} to {target_path}")
+
+
+def summarize_and_confirm(sync_plan):
+    print("\nSummary of actions:")
+    for game, info in sync_plan.items():
+        print(f"{game}: Copy from {info['source_name']} to {info['target_name']}")
+    proceed = input("Proceed with sync? (y/n): ").strip().lower()
+    return proceed == 'y'
 
 
 def main():
+    # Load configuration
     config = load_config()
-    systems = list(config.items())
-    ftp_connections = {name: connect_ftp(info['ip'], info['port']) for name, info in systems}
-    all_games = set()
+
+    # Establish FTP connections
+    ftp_connections = {
+        name: connect_ftp(details["ip"], details["port"]) 
+        for name, details in config.items()
+    }
+
+    # Get the list of games and latest saves for each system
     saves = {}
+    for name, ftp in ftp_connections.items():
+        display_name = config[name]["display_name"]
+        print(f"\n[INFO] Checking games on {display_name}...")
+        
+        games = list_games(ftp)
+        saves[name] = {}
+        for game_path in games:
+            latest_save = get_latest_save(ftp, game_path)
+            if latest_save:
+                game_name = game_path.replace(SAVE_PATH + '/', '')
+                saves[name][game_name] = latest_save
+                print(f"[INFO] Found latest save for {game_name}: {latest_save}")
 
-    for game, latest_save in saves[name].items():
-        if latest_save:
-            # Determine the direction
-            direction = "n3ds -> n3dsxl" if name == "n3ds" else "n3dsxl -> n3ds"
-            # Print the full path and direction
-            print(f"{latest_save} - {direction}")
-
+    # Determine sync plan
     sync_plan = {}
-    for game in all_games:
+    for game in set(g for s in saves.values() for g in s):
         latest = {}
-        for system, save_data in saves.items():
-            if game in save_data and save_data[game]:
-                latest[system] = save_data[game]
+        for system, game_saves in saves.items():
+            if game in game_saves:
+                latest[system] = game_saves[game]
 
         if len(latest) == 1:
-            source, latest_save = next(iter(latest.items()))
-            target = [s for s in saves if s != source][0]
-            sync_plan[game] = {'source': source, 'target': target, 'save': latest_save}
+            source = next(iter(latest.items()))
+            target = [s for s in saves if s != source[0]][0]
+            sync_plan[game] = {
+                'source': source[0], 
+                'target': target, 
+                'save': source[1],
+                'source_name': config[source[0]]['display_name'],
+                'target_name': config[target]['display_name']
+            }
         elif len(latest) == 2:
             sys1, sys2 = list(latest.keys())
             if latest[sys1] > latest[sys2]:
-                sync_plan[game] = {'source': sys1, 'target': sys2, 'save': latest[sys1]}
+                sync_plan[game] = {
+                    'source': sys1, 
+                    'target': sys2, 
+                    'save': latest[sys1],
+                    'source_name': config[sys1]['display_name'],
+                    'target_name': config[sys2]['display_name']
+                }
             elif latest[sys2] > latest[sys1]:
-                sync_plan[game] = {'source': sys2, 'target': sys1, 'save': latest[sys2]}
+                sync_plan[game] = {
+                    'source': sys2, 
+                    'target': sys1, 
+                    'save': latest[sys2],
+                    'source_name': config[sys2]['display_name'],
+                    'target_name': config[sys1]['display_name']
+                }
 
+    # Confirm and execute sync
     if summarize_and_confirm(sync_plan):
         for game, info in sync_plan.items():
-            print(f"Syncing {game} from {info['source']} to {info['target']}")
             source_ftp = ftp_connections[info['source']]
             target_ftp = ftp_connections[info['target']]
-            sync_save(source_ftp, target_ftp, game, info['save'])
+            sync_save(source_ftp, target_ftp, info['save'], info['save'])
 
+    # Clean up FTP connections and temp files
     for ftp in ftp_connections.values():
         ftp.quit()
-
     if os.path.exists(TMP_DIR):
         shutil.rmtree(TMP_DIR)
 
