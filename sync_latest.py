@@ -197,7 +197,7 @@ def main():
         for game, info in sync_plan.items():
             source_ftp = ftp_connections[info['source']]
             target_ftp = ftp_connections[info['target']]
-            sync_save(source_ftp, target_ftp, info['save'], info['save'])
+            sync_save(source_ftp, target_ftp, info['source_name'], info['target_name'], info['save'], info['save'])
 
     # Clean up FTP connections and temp files
     for ftp in ftp_connections.values():
